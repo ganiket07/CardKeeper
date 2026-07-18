@@ -1,0 +1,170 @@
+<div class="wrap">
+  <header class="app">
+    <div class="brand">
+      <div class="mark">&#9827;</div>
+      <div>
+        <h1>Card Table</h1>
+        <p>score helper</p>
+      </div>
+    </div>
+    @if (svc.game()) {
+      <button class="ghost-btn danger" (click)="confirmNewGame()">&#8635; New game</button>
+    }
+  </header>
+
+  @if (!svc.game()) {
+    <section class="card setup">
+      <h2>New game</h2>
+      <p class="sub">Count each loser down with the &minus;5 button, leave the winner blank, then tap the tick to fill them in and start the next round.</p>
+
+      <label class="field-label">Number of players</label>
+      <div class="count-row">
+        <div class="stepper">
+          <button (click)="decCount()" aria-label="fewer players">&minus;</button>
+          <div class="val">{{ count() }}</div>
+          <button (click)="incCount()" aria-label="more players">+</button>
+        </div>
+        <span class="muted-hint">2 to 8 players</span>
+      </div>
+
+      <label class="field-label">Player names</label>
+      <div class="names">
+        @for (n of names(); track $index) {
+          <div class="name-input">
+            <span class="dot">{{ $index + 1 }}</span>
+            <input class="txt" type="text" maxlength="14" [value]="n"
+                   [placeholder]="'Player ' + ($index + 1)"
+                   (input)="setName($index, $any($event.target).value)" />
+          </div>
+        }
+      </div>
+
+      <button class="primary-btn" (click)="start()">Start game</button>
+    </section>
+  } @else {
+    <section>
+      <div class="meta">
+        <span class="chip"><b>{{ svc.game()!.names.length }}</b> players</span>
+        <span class="chip"><b>{{ svc.game()!.rounds.length }}</b> rounds</span>
+        <button class="ghost-btn edit-round-btn" (click)="openEditPrompt()">&#9998; Edit round</button>
+      </div>
+
+      @if (editPromptOpen()) {
+        <div class="modal-backdrop" (click)="closeEditPrompt()">
+          <div class="modal" (click)="$event.stopPropagation()">
+            <h3>Edit a round</h3>
+            <p class="hint">Enter the round number to correct. It unlocks just that round until you confirm it with the tick again.</p>
+            <input class="txt" type="text" inputmode="numeric" [value]="editRowInput()"
+                   placeholder="Round number" autofocus
+                   (input)="setEditRowInput($any($event.target).value)"
+                   (keydown.enter)="confirmEditPrompt()" />
+            <div class="modal-actions">
+              <button class="ghost-btn" (click)="closeEditPrompt()">Cancel</button>
+              <button class="primary-btn" (click)="confirmEditPrompt()">Unlock</button>
+            </div>
+          </div>
+        </div>
+      }
+
+      <div class="card board">
+        <table>
+          <thead>
+            <tr>
+              <th class="rc">#</th>
+              @for (name of svc.game()!.names; track $index) {
+                <th>
+                  <span class="pname" contenteditable="true" #nameCell
+                        (blur)="svc.rename($index, nameCell.innerText)"
+                        (keydown.enter)="$event.preventDefault(); nameCell.blur()">{{ name }}</span>
+                </th>
+              }
+              <th class="tickcol"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of svc.game()!.rounds; track $index; let ri = $index) {
+              <tr [class.editing-row]="svc.editRow() === ri" [class.edited-row]="svc.isEditedRound(ri)">
+                <td class="rc">{{ ri + 1 }}</td>
+                @for (cell of row; track $index; let ci = $index) {
+                  <td>
+                    <span class="cell" [class.err]="isErr(row, ci)">
+                      <button class="minus" tabindex="-1" [disabled]="!svc.isEditable(ri) || isLastField(row, ci)" (click)="svc.minus(ri, ci)">&minus;5</button>
+                      <input type="text" inputmode="numeric" [value]="cell"
+                             [class.pos]="!isErr(row, ci) && isFilled(cell) && toNum(cell) > 0"
+                             [class.neg]="!isErr(row, ci) && isFilled(cell) && toNum(cell) < 0"
+                             [placeholder]="cell === '' ? '0' : ''"
+                             [disabled]="!svc.isEditable(ri) || isLastField(row, ci)"
+                             (blur)="commitCell(ri, ci, $event)"
+                             (keydown.enter)="$any($event.target).blur()" />
+                    </span>
+                  </td>
+                }
+                <td>
+                  <button class="tick" [class.ready]="ready(row)" [disabled]="!ready(row)"
+                          (click)="svc.confirmRound(ri)" aria-label="confirm round">&#10003;</button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      @if (messages().length) {
+        <div class="roundwarn">
+          @for (m of messages(); track $index) {
+            <div><span>&#9888;</span><span>{{ m }}</span></div>
+          }
+        </div>
+      }
+
+      <div class="helpnote">
+        <span class="k">&#10003;</span>
+        <span>Enter each loser as a negative (multiples of 5) and leave the winner blank. When one cell is blank, tap the green tick &mdash; it fills that player and opens the next round. Only one player can be positive per round.</span>
+      </div>
+
+      <button class="reveal-btn" (click)="svc.toggleSettle()">
+        {{ svc.settleOpen() ? 'Hide settle up' : 'Show settle up' }}
+      </button>
+
+      @if (svc.settleOpen()) {
+        <div class="card settle">
+          <h3>Settle up</h3>
+          <p class="hint">A positive total means that player <b>receives</b>; negative means they <b>pay</b>. Points are 1:1 &mdash; read them as your stake.</p>
+          <table class="stbl">
+            <thead><tr><th>Player</th><th class="r">Total</th><th class="r">Result</th></tr></thead>
+            <tbody>
+              @for (r of sortedSettle(); track r.idx) {
+                <tr>
+                  <td>
+                    <span class="who">
+                      <span class="dot" [style.background]="colorFor(r.idx) + '22'"
+                            [style.color]="colorFor(r.idx)">{{ initials(r.name) }}</span>
+                      {{ r.name }}
+                    </span>
+                  </td>
+                  <td class="r">
+                    <span class="tot" [class.pos]="r.total > 0" [class.neg]="r.total < 0"
+                          [class.zero]="r.total === 0">{{ fmt(r.total) }}</span>
+                  </td>
+                  <td class="r">
+                    @if (r.total > 0) {
+                      <span class="result pos">&#8601; receives {{ round(r.total) }}</span>
+                    } @else if (r.total < 0) {
+                      <span class="result neg">&#8599; pays {{ round(-r.total) }}</span>
+                    } @else {
+                      <span class="result zero">even</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (!netZero()) {
+            <div class="imbalance">&#9888; A round looks unfinished &mdash; the totals don&rsquo;t net to zero yet.</div>
+          }
+          <button class="ghost-btn danger newgame2" (click)="confirmNewGame()">&#8635; Start a new game</button>
+        </div>
+      }
+    </section>
+  }
+</div>
