@@ -4,6 +4,8 @@ export interface Game {
   rounds: string[][];
   /** Indices of confirmed rounds that were later unlocked and corrected. */
   editedRounds: number[];
+  /** Rounds that must be played before the settle up option unlocks. */
+  unlockRounds: number;
 }
 
 export interface RoundInfo {

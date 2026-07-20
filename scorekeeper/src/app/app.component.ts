@@ -1,6 +1,8 @@
-import { Component, computed, signal } from '@angular/core';
+import { Component, computed, ElementRef, effect, signal, viewChild } from '@angular/core';
 import { GameService } from './game.service';
-import { analyzeRound, fmt, isFilled, roundStatus, toNum } from './scoring';
+import { analyzeRound, fmt, isFilled, roundStatus, simplifySettlement, toNum } from './scoring';
+
+const DEFAULT_ROSTER = ['Aniket', 'Rahul', 'Sandesh', 'Ranjit', 'Bivash'];
 
 @Component({
   selector: 'app-root',
@@ -10,8 +12,13 @@ import { analyzeRound, fmt, isFilled, roundStatus, toNum } from './scoring';
   styleUrl: './app.component.css',
 })
 export class AppComponent {
-  readonly count = signal(3);
-  readonly names = signal<string[]>(['', '', '']);
+  readonly roster = signal<string[]>([...DEFAULT_ROSTER]);
+  readonly selected = signal<Set<number>>(new Set());
+  readonly addingName = signal(false);
+  readonly newNameInput = signal('');
+
+  readonly roundsPromptOpen = signal(false);
+  readonly roundsInput = signal('');
 
   readonly editPromptOpen = signal(false);
   readonly editRowInput = signal('');
@@ -21,29 +28,89 @@ export class AppComponent {
   readonly toNum = toNum;
   readonly round = Math.round;
 
-  constructor(public svc: GameService) {}
+  private readonly boardEl = viewChild<ElementRef<HTMLDivElement>>('boardEl');
+  private readonly settleEl = viewChild<ElementRef<HTMLDivElement>>('settleEl');
+  private lastRoundsLen = 0;
 
-  incCount(): void {
-    if (this.count() < 8) {
-      this.count.update((c) => c + 1);
-      this.names.update((n) => [...n, '']);
-    }
+  constructor(public svc: GameService) {
+    // Auto-scroll the rounds table to the newest round whenever one is added
+    // (not on every cell edit, which also updates the game signal).
+    effect(() => {
+      const len = this.svc.game()?.rounds.length ?? 0;
+      const grew = len > this.lastRoundsLen;
+      this.lastRoundsLen = len;
+      const el = this.boardEl()?.nativeElement;
+      if (el && grew) {
+        setTimeout(() => (el.scrollTop = el.scrollHeight));
+      }
+    });
+    // Auto-scroll the page to the settle up preview when it's opened.
+    effect(() => {
+      const open = this.svc.settleOpen();
+      const el = this.settleEl()?.nativeElement;
+      if (open && el) {
+        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
+    });
   }
-  decCount(): void {
-    if (this.count() > 2) {
-      this.count.update((c) => c - 1);
-      this.names.update((n) => n.slice(0, -1));
-    }
+
+  isSelected(i: number): boolean {
+    return this.selected().has(i);
   }
-  setName(i: number, value: string): void {
-    this.names.update((n) => {
-      const c = [...n];
-      c[i] = value;
+  toggleSelect(i: number): void {
+    this.selected.update((s) => {
+      const c = new Set(s);
+      if (c.has(i)) c.delete(i);
+      else c.add(i);
       return c;
     });
   }
-  start(): void {
-    this.svc.start(this.names());
+  readonly selectedNames = computed<string[]>(() =>
+    this.roster().filter((_, i) => this.selected().has(i))
+  );
+
+  openAddName(): void {
+    this.newNameInput.set('');
+    this.addingName.set(true);
+  }
+  cancelAddName(): void {
+    this.addingName.set(false);
+    this.newNameInput.set('');
+  }
+  setNewNameInput(value: string): void {
+    this.newNameInput.set(value);
+  }
+  confirmAddName(): void {
+    const name = this.newNameInput().trim();
+    if (!name) return;
+    const newIndex = this.roster().length;
+    this.roster.update((r) => [...r, name]);
+    this.selected.update((s) => new Set(s).add(newIndex));
+    this.cancelAddName();
+  }
+
+  openStartFlow(): void {
+    if (this.selectedNames().length < 2) {
+      alert('Select at least 2 players to start.');
+      return;
+    }
+    this.roundsInput.set('');
+    this.roundsPromptOpen.set(true);
+  }
+  closeRoundsPrompt(): void {
+    this.roundsPromptOpen.set(false);
+  }
+  setRoundsInput(value: string): void {
+    this.roundsInput.set(value.replace(/[^0-9]/g, ''));
+  }
+  confirmRoundsPrompt(): void {
+    const n = parseInt(this.roundsInput(), 10);
+    if (isNaN(n) || n <= 0) {
+      alert('Enter a valid number of rounds.');
+      return;
+    }
+    this.svc.start(this.selectedNames(), n);
+    this.roundsPromptOpen.set(false);
   }
 
   status(row: string[]) {
@@ -75,6 +142,25 @@ export class AppComponent {
     return out;
   });
 
+  readonly completedRounds = computed<number>(() => (this.svc.game()?.rounds.length ?? 1) - 1);
+
+  readonly settleUnlocked = computed<boolean>(() => {
+    const g = this.svc.game();
+    if (!g) return false;
+    const n = g.unlockRounds;
+    if (!n || n <= 0) return true;
+    const c = this.completedRounds();
+    return c > 0 && c % n === 0;
+  });
+
+  readonly roundsUntilUnlock = computed<number>(() => {
+    const g = this.svc.game();
+    if (!g) return 0;
+    const n = g.unlockRounds;
+    if (!n || n <= 0) return 0;
+    return n - (this.completedRounds() % n);
+  });
+
   readonly netZero = computed<boolean>(() => {
     const t = this.svc.totals();
     return Math.round(t.reduce((a, b) => a + b, 0)) === 0;
@@ -89,6 +175,23 @@ export class AppComponent {
       .sort((a, b) => b.total - a.total);
   });
 
+  readonly settlementOpen = signal(false);
+  readonly settlementPayments = computed(() => {
+    const g = this.svc.game();
+    if (!g) return [] as { fromIdx: number; toIdx: number; from: string; to: string; amount: number }[];
+    return simplifySettlement(this.svc.totals()).map((s) => ({
+      ...s,
+      from: g.names[s.fromIdx],
+      to: g.names[s.toIdx],
+    }));
+  });
+  openSettlement(): void {
+    this.settlementOpen.set(true);
+  }
+  closeSettlement(): void {
+    this.settlementOpen.set(false);
+  }
+
   initials(name: string): string {
     return (name || '?').trim().slice(0, 2).toUpperCase() || '?';
   }
@@ -98,8 +201,9 @@ export class AppComponent {
   }
   confirmNewGame(): void {
     if (confirm('Start a new game? Your current scores will be cleared.')) {
-      this.count.set(3);
-      this.names.set(['', '', '']);
+      this.roster.set([...DEFAULT_ROSTER]);
+      this.selected.set(new Set());
+      this.cancelAddName();
       this.svc.reset();
     }
   }

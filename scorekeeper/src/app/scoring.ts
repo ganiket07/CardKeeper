@@ -62,6 +62,42 @@ export function playerTotals(game: Game): number[] {
   return totals;
 }
 
+export interface Settlement {
+  fromIdx: number;
+  toIdx: number;
+  amount: number;
+}
+
+/**
+ * Reduce per-player totals to a minimal-ish set of payments (largest debtor pays
+ * largest creditor, repeat) instead of everyone settling with everyone.
+ */
+export function simplifySettlement(totals: number[]): Settlement[] {
+  const creditors = totals
+    .map((t, i) => ({ i, amt: Math.round(t) }))
+    .filter((x) => x.amt > 0)
+    .sort((a, b) => b.amt - a.amt);
+  const debtors = totals
+    .map((t, i) => ({ i, amt: -Math.round(t) }))
+    .filter((x) => x.amt > 0)
+    .sort((a, b) => b.amt - a.amt);
+
+  const out: Settlement[] = [];
+  let ci = 0;
+  let di = 0;
+  while (ci < creditors.length && di < debtors.length) {
+    const c = creditors[ci];
+    const d = debtors[di];
+    const amount = Math.min(c.amt, d.amt);
+    if (amount > 0) out.push({ fromIdx: d.i, toIdx: c.i, amount });
+    c.amt -= amount;
+    d.amt -= amount;
+    if (c.amt === 0) ci++;
+    if (d.amt === 0) di++;
+  }
+  return out;
+}
+
 /** Signed display string, e.g. +10, 0, or −5 (real minus glyph). */
 export const fmt = (n: number): string => {
   n = Math.round(n);

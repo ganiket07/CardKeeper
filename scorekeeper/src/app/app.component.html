@@ -17,30 +17,54 @@
       <h2>New game</h2>
       <p class="sub">Count each loser down with the &minus;5 button, leave the winner blank, then tap the tick to fill them in and start the next round.</p>
 
-      <label class="field-label">Number of players</label>
-      <div class="count-row">
-        <div class="stepper">
-          <button (click)="decCount()" aria-label="fewer players">&minus;</button>
-          <div class="val">{{ count() }}</div>
-          <button (click)="incCount()" aria-label="more players">+</button>
-        </div>
-        <span class="muted-hint">2 to 8 players</span>
-      </div>
-
-      <label class="field-label">Player names</label>
-      <div class="names">
-        @for (n of names(); track $index) {
-          <div class="name-input">
-            <span class="dot">{{ $index + 1 }}</span>
-            <input class="txt" type="text" maxlength="14" [value]="n"
-                   [placeholder]="'Player ' + ($index + 1)"
-                   (input)="setName($index, $any($event.target).value)" />
+      <label class="field-label">Select players</label>
+      <div class="roster-grid">
+        @for (name of roster(); track $index) {
+          <button type="button" class="player-card" [class.selected]="isSelected($index)"
+                  (click)="toggleSelect($index)">
+            <span class="dot" [style.background]="colorFor($index) + '22'"
+                  [style.color]="colorFor($index)">{{ initials(name) }}</span>
+            <span class="pname2">{{ name }}</span>
+          </button>
+        }
+        @if (addingName()) {
+          <div class="player-card adding">
+            <input class="txt add-input" type="text" maxlength="14" placeholder="Name" autofocus
+                   [value]="newNameInput()"
+                   (input)="setNewNameInput($any($event.target).value)"
+                   (keydown.enter)="confirmAddName()" />
+            <button class="tick small" [class.ready]="!!newNameInput().trim()"
+                    [disabled]="!newNameInput().trim()" (click)="confirmAddName()" aria-label="add player">&#10003;</button>
+            <button class="ghost-btn cancel-add" (click)="cancelAddName()" aria-label="cancel">&times;</button>
           </div>
+        } @else {
+          <button type="button" class="player-card add-card" (click)="openAddName()">
+            <span class="dot add-dot">+</span>
+            <span class="pname2">Add player</span>
+          </button>
         }
       </div>
+      <p class="muted-hint sel-hint">{{ selectedNames().length }} selected &middot; tap a card to toggle</p>
 
-      <button class="primary-btn" (click)="start()">Start game</button>
+      <button class="primary-btn" (click)="openStartFlow()">Start game</button>
     </section>
+
+    @if (roundsPromptOpen()) {
+      <div class="modal-backdrop" (click)="closeRoundsPrompt()">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <h3>Rounds to unlock settle up</h3>
+          <p class="hint">Enter how many rounds should be played before the settle up option unlocks.</p>
+          <input class="txt" type="text" inputmode="numeric" [value]="roundsInput()"
+                 placeholder="e.g. 5" autofocus
+                 (input)="setRoundsInput($any($event.target).value)"
+                 (keydown.enter)="confirmRoundsPrompt()" />
+          <div class="modal-actions">
+            <button class="ghost-btn" (click)="closeRoundsPrompt()">Cancel</button>
+            <button class="primary-btn" (click)="confirmRoundsPrompt()">Start game</button>
+          </div>
+        </div>
+      </div>
+    }
   } @else {
     <section>
       <div class="meta">
@@ -66,7 +90,7 @@
         </div>
       }
 
-      <div class="card board">
+      <div class="card board" #boardEl>
         <table>
           <thead>
             <tr>
@@ -122,12 +146,18 @@
         <span>Enter each loser as a negative (multiples of 5) and leave the winner blank. When one cell is blank, tap the green tick &mdash; it fills that player and opens the next round. Only one player can be positive per round.</span>
       </div>
 
-      <button class="reveal-btn" (click)="svc.toggleSettle()">
-        {{ svc.settleOpen() ? 'Hide settle up' : 'Show settle up' }}
+      <button class="reveal-btn" [disabled]="!svc.settleOpen() && !settleUnlocked()" (click)="svc.toggleSettle()">
+        @if (svc.settleOpen()) {
+          Hide settle up
+        } @else if (settleUnlocked()) {
+          Show settle up
+        } @else {
+          Settle up unlocks in {{ roundsUntilUnlock() }} round{{ roundsUntilUnlock() === 1 ? '' : 's' }}
+        }
       </button>
 
       @if (svc.settleOpen()) {
-        <div class="card settle">
+        <div class="card settle" #settleEl>
           <h3>Settle up</h3>
           <p class="hint">A positive total means that player <b>receives</b>; negative means they <b>pay</b>. Points are 1:1 &mdash; read them as your stake.</p>
           <table class="stbl">
@@ -162,7 +192,41 @@
           @if (!netZero()) {
             <div class="imbalance">&#9888; A round looks unfinished &mdash; the totals don&rsquo;t net to zero yet.</div>
           }
-          <button class="ghost-btn danger newgame2" (click)="confirmNewGame()">&#8635; Start a new game</button>
+          <button class="primary-btn newgame2" (click)="openSettlement()">Settle</button>
+        </div>
+      }
+
+      @if (settlementOpen()) {
+        <div class="modal-backdrop" (click)="closeSettlement()">
+          <div class="modal settle-modal" (click)="$event.stopPropagation()">
+            <h3>Settle up</h3>
+            <p class="hint">Simplified so no one pays more people than they need to.</p>
+            @if (settlementPayments().length) {
+              <ul class="txn-list">
+                @for (p of settlementPayments(); track $index) {
+                  <li>
+                    <span class="who">
+                      <span class="dot" [style.background]="colorFor(p.fromIdx) + '22'"
+                            [style.color]="colorFor(p.fromIdx)">{{ initials(p.from) }}</span>
+                      {{ p.from }}
+                    </span>
+                    <span class="arrow">&#8594;</span>
+                    <span class="who">
+                      <span class="dot" [style.background]="colorFor(p.toIdx) + '22'"
+                            [style.color]="colorFor(p.toIdx)">{{ initials(p.to) }}</span>
+                      {{ p.to }}
+                    </span>
+                    <span class="amt">{{ p.amount }}</span>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="hint">Everyone is already settled up.</p>
+            }
+            <div class="modal-actions">
+              <button class="primary-btn" (click)="closeSettlement()">Done</button>
+            </div>
+          </div>
         </div>
       }
     </section>

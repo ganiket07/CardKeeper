@@ -31,11 +31,11 @@ export class GameService {
     });
   }
 
-  start(names: string[]): void {
+  start(names: string[], unlockRounds: number): void {
     const clean = names.map((n, i) => (n && n.trim()) || `Player ${i + 1}`);
     this.settleOpen.set(false);
     this.editRow.set(null);
-    this.game.set({ names: clean, rounds: [clean.map(() => '')], editedRounds: [] });
+    this.game.set({ names: clean, rounds: [clean.map(() => '')], editedRounds: [], unlockRounds });
   }
 
   /** The current (last, unconfirmed) round is always editable; an unlocked past round also is. */
@@ -148,7 +148,12 @@ export class GameService {
   private mutate(fn: (g: Game) => void): void {
     const g = this.game();
     if (!g) return;
-    const copy: Game = { names: [...g.names], rounds: g.rounds.map((r) => [...r]), editedRounds: [...g.editedRounds] };
+    const copy: Game = {
+      names: [...g.names],
+      rounds: g.rounds.map((r) => [...r]),
+      editedRounds: [...g.editedRounds],
+      unlockRounds: g.unlockRounds,
+    };
     fn(copy);
     this.game.set(copy);
   }
@@ -160,6 +165,7 @@ export class GameService {
         const g = JSON.parse(raw);
         if (g && Array.isArray(g.names) && Array.isArray(g.rounds)) {
           if (!Array.isArray(g.editedRounds)) g.editedRounds = [];
+          if (typeof g.unlockRounds !== 'number') g.unlockRounds = 0;
           return g;
         }
       }
