@@ -27,6 +27,7 @@ export class AppComponent {
   readonly isFilled = isFilled;
   readonly toNum = toNum;
   readonly round = Math.round;
+  
 
   private readonly boardEl = viewChild<ElementRef<HTMLDivElement>>('boardEl');
   private readonly settleEl = viewChild<ElementRef<HTMLDivElement>>('settleEl');
