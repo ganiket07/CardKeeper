@@ -29,6 +29,7 @@ export class AppComponent {
   readonly round = Math.round;
   
 
+
   private readonly boardEl = viewChild<ElementRef<HTMLDivElement>>('boardEl');
   private readonly settleEl = viewChild<ElementRef<HTMLDivElement>>('settleEl');
   private lastRoundsLen = 0;
