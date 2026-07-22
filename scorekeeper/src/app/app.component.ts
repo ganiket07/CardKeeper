@@ -1,6 +1,6 @@
 import { Component, computed, ElementRef, effect, signal, viewChild } from '@angular/core';
 import { GameService } from './game.service';
-import { analyzeRound, fmt, isFilled, roundStatus, simplifySettlement, toNum } from './scoring';
+import { analyzeRound, capitalizeName, fmt, isFilled, roundStatus, simplifySettlement, toNum } from './scoring';
 
 const DEFAULT_ROSTER = ['Aniket', 'Rahul', 'Sandesh', 'Ranjit', 'Bivash'];
 
@@ -22,6 +22,14 @@ export class AppComponent {
 
   readonly editPromptOpen = signal(false);
   readonly editRowInput = signal('');
+
+  readonly memberPromptOpen = signal(false);
+  readonly memberMode = signal<'menu' | 'add' | 'remove'>('menu');
+  readonly newMemberInput = signal('');
+  readonly removeMemberIdx = signal<number | null>(null);
+
+  readonly editRoundsPromptOpen = signal(false);
+  readonly editRoundsInput = signal('');
 
   readonly fmt = fmt;
   readonly isFilled = isFilled;
@@ -83,7 +91,7 @@ export class AppComponent {
     this.newNameInput.set(value);
   }
   confirmAddName(): void {
-    const name = this.newNameInput().trim();
+    const name = capitalizeName(this.newNameInput());
     if (!name) return;
     const newIndex = this.roster().length;
     this.roster.update((r) => [...r, name]);
@@ -232,5 +240,76 @@ export class AppComponent {
       return;
     }
     this.closeEditPrompt();
+  }
+
+  readonly activeMembersList = computed<{ name: string; idx: number }[]>(() => {
+    const g = this.svc.game();
+    if (!g) return [];
+    return g.names.map((name, idx) => ({ name, idx })).filter((m) => g.active[m.idx]);
+  });
+
+  openMemberPrompt(): void {
+    this.memberMode.set('menu');
+    this.newMemberInput.set('');
+    this.removeMemberIdx.set(null);
+    this.memberPromptOpen.set(true);
+  }
+  closeMemberPrompt(): void {
+    this.memberPromptOpen.set(false);
+  }
+  backToMemberMenu(): void {
+    this.memberMode.set('menu');
+  }
+  chooseAddMember(): void {
+    this.newMemberInput.set('');
+    this.memberMode.set('add');
+  }
+  chooseRemoveMember(): void {
+    this.removeMemberIdx.set(null);
+    this.memberMode.set('remove');
+  }
+  setNewMemberInput(value: string): void {
+    this.newMemberInput.set(value);
+  }
+  confirmAddMember(): void {
+    const name = this.newMemberInput().trim();
+    if (!name) return;
+    if (!this.svc.addMember(name)) {
+      alert('A player with that name is already in the game.');
+      return;
+    }
+    this.closeMemberPrompt();
+  }
+  selectRemoveMember(idx: number): void {
+    this.removeMemberIdx.set(idx);
+  }
+  confirmRemoveMember(): void {
+    const idx = this.removeMemberIdx();
+    if (idx === null) return;
+    if (!this.svc.removeMember(idx)) {
+      alert('At least 2 active players are required — cannot remove this member.');
+      return;
+    }
+    this.closeMemberPrompt();
+  }
+
+  openEditRoundsPrompt(): void {
+    this.editRoundsInput.set(String(this.svc.game()?.unlockRounds ?? ''));
+    this.editRoundsPromptOpen.set(true);
+  }
+  closeEditRoundsPrompt(): void {
+    this.editRoundsPromptOpen.set(false);
+  }
+  setEditRoundsInput(value: string): void {
+    this.editRoundsInput.set(value.replace(/[^0-9]/g, ''));
+  }
+  confirmEditRoundsPrompt(): void {
+    const n = parseInt(this.editRoundsInput(), 10);
+    if (isNaN(n) || n <= 0) {
+      alert('Enter a valid number of rounds.');
+      return;
+    }
+    this.svc.setUnlockRounds(n);
+    this.closeEditRoundsPrompt();
   }
 }

@@ -70,6 +70,8 @@
       <div class="meta">
         <span class="chip"><b>{{ svc.game()!.names.length }}</b> players</span>
         <span class="chip"><b>{{ svc.game()!.rounds.length }}</b> rounds</span>
+        <button class="ghost-btn edit-round-btn" (click)="openMemberPrompt()">&#128101; Edit member</button>
+        <button class="ghost-btn edit-round-btn" (click)="openEditRoundsPrompt()">&#128337; Edit unlock</button>
         <button class="ghost-btn edit-round-btn" (click)="openEditPrompt()">&#9998; Edit round</button>
       </div>
 
@@ -90,16 +92,82 @@
         </div>
       }
 
+      @if (memberPromptOpen()) {
+        <div class="modal-backdrop" (click)="closeMemberPrompt()">
+          <div class="modal" (click)="$event.stopPropagation()">
+            @if (memberMode() === 'menu') {
+              <h3>Edit member</h3>
+              <p class="hint">Add a new player or remove one from the game.</p>
+              <div class="menu-stack">
+                <button class="primary-btn" (click)="chooseAddMember()">Add member</button>
+                <button class="ghost-btn wide" (click)="chooseRemoveMember()">Remove member</button>
+              </div>
+              <div class="modal-actions">
+                <button class="ghost-btn" (click)="closeMemberPrompt()">Cancel</button>
+              </div>
+            } @else if (memberMode() === 'add') {
+              <h3>Add member</h3>
+              <p class="hint">They join starting this round. Earlier rounds are recorded as 0 for them, so past totals don&rsquo;t change.</p>
+              <input class="txt" type="text" maxlength="14" placeholder="Name" autofocus
+                     [value]="newMemberInput()"
+                     (input)="setNewMemberInput($any($event.target).value)"
+                     (keydown.enter)="confirmAddMember()" />
+              <div class="modal-actions">
+                <button class="ghost-btn" (click)="backToMemberMenu()">Back</button>
+                <button class="primary-btn" [disabled]="!newMemberInput().trim()" (click)="confirmAddMember()">Add</button>
+              </div>
+            } @else {
+              <h3>Remove member</h3>
+              <p class="hint">Their score freezes at 0 for every round from here on &mdash; past rounds are unaffected.</p>
+              <div class="roster-grid remove-list">
+                @for (m of activeMembersList(); track m.idx) {
+                  <button type="button" class="player-card" [class.selected]="removeMemberIdx() === m.idx"
+                          (click)="selectRemoveMember(m.idx)">
+                    <span class="dot" [style.background]="colorFor(m.idx) + '22'"
+                          [style.color]="colorFor(m.idx)">{{ initials(m.name) }}</span>
+                    <span class="pname2">{{ m.name }}</span>
+                  </button>
+                }
+              </div>
+              <div class="modal-actions">
+                <button class="ghost-btn" (click)="backToMemberMenu()">Back</button>
+                <button class="primary-btn" [disabled]="removeMemberIdx() === null" (click)="confirmRemoveMember()">Remove</button>
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (editRoundsPromptOpen()) {
+        <div class="modal-backdrop" (click)="closeEditRoundsPrompt()">
+          <div class="modal" (click)="$event.stopPropagation()">
+            <h3>Edit rounds to unlock settle up</h3>
+            <p class="hint">Change how many rounds should be played before the settle up option unlocks.</p>
+            <input class="txt" type="text" inputmode="numeric" [value]="editRoundsInput()"
+                   placeholder="e.g. 5" autofocus
+                   (input)="setEditRoundsInput($any($event.target).value)"
+                   (keydown.enter)="confirmEditRoundsPrompt()" />
+            <div class="modal-actions">
+              <button class="ghost-btn" (click)="closeEditRoundsPrompt()">Cancel</button>
+              <button class="primary-btn" (click)="confirmEditRoundsPrompt()">Save</button>
+            </div>
+          </div>
+        </div>
+      }
+
       <div class="card board" #boardEl>
         <table>
           <thead>
             <tr>
               <th class="rc">#</th>
               @for (name of svc.game()!.names; track $index) {
-                <th>
+                <th [class.removed-col]="!svc.game()!.active[$index]">
                   <span class="pname" contenteditable="true" #nameCell
                         (blur)="svc.rename($index, nameCell.innerText)"
                         (keydown.enter)="$event.preventDefault(); nameCell.blur()">{{ name }}</span>
+                  @if (!svc.game()!.active[$index]) {
+                    <span class="removed-tag">removed</span>
+                  }
                 </th>
               }
               <th class="tickcol"></th>
@@ -112,12 +180,12 @@
                 @for (cell of row; track $index; let ci = $index) {
                   <td>
                     <span class="cell" [class.err]="isErr(row, ci)">
-                      <button class="minus" tabindex="-1" [disabled]="!svc.isEditable(ri) || isLastField(row, ci)" (click)="svc.minus(ri, ci)">&minus;5</button>
+                      <button class="minus" tabindex="-1" [disabled]="!svc.isCellEditable(ri, ci) || isLastField(row, ci)" (click)="svc.minus(ri, ci)">&minus;5</button>
                       <input type="text" inputmode="numeric" [value]="cell"
                              [class.pos]="!isErr(row, ci) && isFilled(cell) && toNum(cell) > 0"
                              [class.neg]="!isErr(row, ci) && isFilled(cell) && toNum(cell) < 0"
                              [placeholder]="cell === '' ? '0' : ''"
-                             [disabled]="!svc.isEditable(ri) || isLastField(row, ci)"
+                             [disabled]="!svc.isCellEditable(ri, ci) || isLastField(row, ci)"
                              (blur)="commitCell(ri, ci, $event)"
                              (keydown.enter)="$any($event.target).blur()" />
                     </span>

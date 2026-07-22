@@ -48,6 +48,7 @@ describe('scoring logic', () => {
       ],
       editedRounds: [],
       unlockRounds: 0,
+      active: [true, true, true],
     });
     expect(totals).toEqual([-10, 5, 5]);
   });

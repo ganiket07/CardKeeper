@@ -105,3 +105,9 @@ export const fmt = (n: number): string => {
   if (n < 0) return '\u2212' + Math.abs(n);
   return '0';
 };
+
+/** Trim and capitalize just the first character, e.g. 'aniket' -> 'Aniket'. */
+export const capitalizeName = (name: string): string => {
+  const t = (name || '').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+};

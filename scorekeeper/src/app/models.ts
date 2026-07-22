@@ -6,6 +6,9 @@ export interface Game {
   editedRounds: number[];
   /** Rounds that must be played before the settle up option unlocks. */
   unlockRounds: number;
+  /** Whether each column (by index) is currently playing. Removed members stay in
+   *  the data as a frozen column instead of being deleted. */
+  active: boolean[];
 }
 
 export interface RoundInfo {

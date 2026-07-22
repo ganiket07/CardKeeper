@@ -1,6 +1,6 @@
 import { computed, effect, Injectable, signal } from '@angular/core';
 import { Game } from './models';
-import { analyzeRound, playerTotals, roundStatus, toNum } from './scoring';
+import { analyzeRound, capitalizeName, playerTotals, roundStatus, toNum } from './scoring';
 
 const KEY = 'cardtable:game:v1';
 
@@ -32,16 +32,86 @@ export class GameService {
   }
 
   start(names: string[], unlockRounds: number): void {
-    const clean = names.map((n, i) => (n && n.trim()) || `Player ${i + 1}`);
+    const clean = names.map((n, i) => capitalizeName(n) || `Player ${i + 1}`);
     this.settleOpen.set(false);
     this.editRow.set(null);
-    this.game.set({ names: clean, rounds: [clean.map(() => '')], editedRounds: [], unlockRounds });
+    this.game.set({
+      names: clean,
+      rounds: [clean.map(() => '')],
+      editedRounds: [],
+      unlockRounds,
+      active: clean.map(() => true),
+    });
   }
 
   /** The current (last, unconfirmed) round is always editable; an unlocked past round also is. */
   isEditable(ri: number): boolean {
     const g = this.game();
     return !!g && (ri === g.rounds.length - 1 || ri === this.editRow());
+  }
+
+  /** Like isEditable, but also false for a removed member's frozen column. */
+  isCellEditable(ri: number, ci: number): boolean {
+    const g = this.game();
+    return this.isEditable(ri) && !!g?.active[ci];
+  }
+
+  /**
+   * Add a player mid-game. If their name (case-insensitively) matches a previously
+   * removed member, that same frozen column is reactivated instead of creating a new
+   * one, so their earlier history stays attached to them. Otherwise a new column is
+   * appended: earlier rounds are backfilled with '0' (they weren't playing, so it can't
+   * affect totals) and the current in-progress round gets a normal blank cell. Rejects
+   * a name that clashes (case-insensitively) with a currently active player.
+   */
+  addMember(rawName: string): boolean {
+    const g = this.game();
+    if (!g) return false;
+    const name = capitalizeName(rawName);
+    if (!name) return false;
+    const lower = name.toLowerCase();
+    const activeClash = g.names.some((n, i) => g.active[i] && n.trim().toLowerCase() === lower);
+    if (activeClash) return false;
+    const rejoinIdx = g.names.findIndex((n, i) => !g.active[i] && n.trim().toLowerCase() === lower);
+    this.mutate((gg) => {
+      if (rejoinIdx !== -1) {
+        gg.active[rejoinIdx] = true;
+        gg.names[rejoinIdx] = name;
+        const last = gg.rounds[gg.rounds.length - 1];
+        if (last[rejoinIdx] === '0') last[rejoinIdx] = '';
+      } else {
+        gg.names.push(name);
+        gg.active.push(true);
+        const lastIdx = gg.rounds.length - 1;
+        gg.rounds.forEach((row, ri) => {
+          row.push(ri < lastIdx ? '0' : '');
+        });
+      }
+    });
+    return true;
+  }
+
+  /**
+   * Remove a member without deleting their column: past values stay, the column is
+   * frozen (no longer editable), and every round from here on prefills '0' for them.
+   * Requires at least 2 active players to remain so the game stays playable.
+   */
+  removeMember(index: number): boolean {
+    const g = this.game();
+    if (!g || index < 0 || index >= g.names.length || !g.active[index]) return false;
+    if (g.active.filter(Boolean).length <= 2) return false;
+    this.mutate((gg) => {
+      gg.active[index] = false;
+      const last = gg.rounds[gg.rounds.length - 1];
+      if (last[index] === '') last[index] = '0';
+    });
+    return true;
+  }
+
+  setUnlockRounds(n: number): void {
+    this.mutate((g) => {
+      g.unlockRounds = n;
+    });
   }
 
   isEditedRound(ri: number): boolean {
@@ -114,7 +184,7 @@ export class GameService {
       if (editing) {
         if (!gg.editedRounds.includes(ri)) gg.editedRounds = [...gg.editedRounds, ri];
       } else {
-        gg.rounds.push(gg.names.map(() => ''));
+        gg.rounds.push(gg.names.map((_, i) => (gg.active[i] ? '' : '0')));
       }
     });
     if (editing) this.editRow.set(null);
@@ -123,7 +193,7 @@ export class GameService {
   deleteRound(ri: number): void {
     this.mutate((g) => {
       g.rounds.splice(ri, 1);
-      if (g.rounds.length === 0) g.rounds.push(g.names.map(() => ''));
+      if (g.rounds.length === 0) g.rounds.push(g.names.map((_, i) => (g.active[i] ? '' : '0')));
       g.editedRounds = g.editedRounds.filter((x) => x !== ri).map((x) => (x > ri ? x - 1 : x));
     });
     if (this.editRow() === ri) this.editRow.set(null);
@@ -131,7 +201,7 @@ export class GameService {
 
   rename(i: number, name: string): void {
     this.mutate((g) => {
-      g.names[i] = (name && name.trim()) || `Player ${i + 1}`;
+      g.names[i] = capitalizeName(name) || `Player ${i + 1}`;
     });
   }
 
@@ -153,6 +223,7 @@ export class GameService {
       rounds: g.rounds.map((r) => [...r]),
       editedRounds: [...g.editedRounds],
       unlockRounds: g.unlockRounds,
+      active: [...g.active],
     };
     fn(copy);
     this.game.set(copy);
@@ -166,6 +237,9 @@ export class GameService {
         if (g && Array.isArray(g.names) && Array.isArray(g.rounds)) {
           if (!Array.isArray(g.editedRounds)) g.editedRounds = [];
           if (typeof g.unlockRounds !== 'number') g.unlockRounds = 0;
+          if (!Array.isArray(g.active) || g.active.length !== g.names.length) {
+            g.active = g.names.map(() => true);
+          }
           return g;
         }
       }
